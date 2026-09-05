@@ -1,3 +1,5 @@
+import pytest
+
 from src import spotify
 
 
@@ -238,6 +240,35 @@ def test_search_stays_bounded_at_two_queries(monkeypatch):
     monkeypatch.setattr(spotify, "_spotify_get", fake_get)
     assert spotify.search_track("test-token", "Missing", ["Artist"], "Album") is None
     assert len(calls) <= 2
+
+
+def test_spotify_get_raises_immediately_for_expired_token(monkeypatch):
+    class UnauthorizedResponse:
+        status_code = 401
+        headers = {}
+
+    monkeypatch.setattr(
+        spotify.requests,
+        "get",
+        lambda *_args, **_kwargs: UnauthorizedResponse(),
+    )
+
+    with pytest.raises(spotify.SpotifyUnauthorizedError):
+        spotify._spotify_get("https://example.invalid", "expired", {})
+
+
+def test_playlist_replace_reports_expired_token(monkeypatch):
+    class UnauthorizedResponse:
+        status_code = 401
+
+    monkeypatch.setattr(
+        spotify.requests,
+        "put",
+        lambda *_args, **_kwargs: UnauthorizedResponse(),
+    )
+
+    with pytest.raises(spotify.SpotifyUnauthorizedError):
+        spotify.replace_playlist_tracks("expired", "playlist", ["track"])
 
 
 def test_real_dry_run_artist_and_ost_variants(monkeypatch):
@@ -738,7 +769,12 @@ def test_musicbrainz_rescues_japanese_title_with_romanized_candidate(monkeypatch
         if url.endswith("/artist"):
             return FakeMBResponse({"artists": [{"id": "taeko-mbid"}]})
         if url.endswith("/isrc/JPCR07700360"):
-            return FakeMBResponse({"recordings": [{"id": "tokai-normal"}, {"id": "tokai-dj"}]})
+            return FakeMBResponse({
+                "recordings": [
+                    {"id": "tokai-normal"},
+                    {"id": "tokai-dj"},
+                ]
+            })
         if url.endswith("/recording/tokai-dj"):
             return FakeMBResponse({
                 "id": "tokai-dj", "title": "都会", "length": 109000,
@@ -753,57 +789,111 @@ def test_musicbrainz_rescues_japanese_title_with_romanized_candidate(monkeypatch
 
     monkeypatch.setattr(spotify.requests, "get", fake_get)
     monkeypatch.setattr(spotify.time, "sleep", lambda *_args: None)
-    assert run_search(monkeypatch, "都会", ["大貫妙子"], "Sunshower", [candidate]) == "tokai"
+    assert run_search(
+        monkeypatch, "都会", ["大貫妙子"], "Sunshower", [candidate]
+    ) == "tokai"
 
 
 def test_cross_script_rescue_requires_musicbrainz_recording_evidence(monkeypatch):
     candidate = track("tokai", "Tokai", ["Taeko Onuki"], "SUNSHOWER")
-    candidate.update({"external_ids": {"isrc": "JPCR07700360"}, "duration_ms": 310173})
+    candidate.update({
+        "external_ids": {"isrc": "JPCR07700360"},
+        "duration_ms": 310173,
+    })
 
     monkeypatch.setattr(
         spotify,
         "_musicbrainz_artist_identity_supported",
         lambda *_args: True,
     )
-    monkeypatch.setattr(spotify, "_musicbrainz_recordings_for_isrc", lambda _isrc: [])
+    monkeypatch.setattr(
+        spotify, "_musicbrainz_recordings_for_isrc", lambda _isrc: []
+    )
     monkeypatch.setattr(spotify.time, "sleep", lambda *_args: None)
-    assert run_search(monkeypatch, "都会", ["大貫妙子"], "Sunshower", [candidate]) is None
+    assert run_search(
+        monkeypatch, "都会", ["大貫妙子"], "Sunshower", [candidate]
+    ) is None
 
 
 def test_cross_script_rescue_does_not_override_version_conflict(monkeypatch):
-    candidate = track("tokai-live", "Tokai - Live", ["Taeko Onuki"], "SUNSHOWER")
-    candidate.update({"external_ids": {"isrc": "JPCR07700360"}, "duration_ms": 310173})
+    candidate = track(
+        "tokai-live", "Tokai - Live", ["Taeko Onuki"], "SUNSHOWER"
+    )
+    candidate.update({
+        "external_ids": {"isrc": "JPCR07700360"},
+        "duration_ms": 310173,
+    })
     calls = []
-    monkeypatch.setattr(spotify, "_musicbrainz_artist_identity_supported", lambda *_args: calls.append(True) or True)
+    monkeypatch.setattr(
+        spotify,
+        "_musicbrainz_artist_identity_supported",
+        lambda *_args: calls.append(True) or True,
+    )
     monkeypatch.setattr(spotify.time, "sleep", lambda *_args: None)
-    assert run_search(monkeypatch, "都会", ["大貫妙子"], "Sunshower", [candidate]) is None
+    assert run_search(
+        monkeypatch, "都会", ["大貫妙子"], "Sunshower", [candidate]
+    ) is None
     assert calls == []
 
 
 def test_cross_script_rescue_rejects_unconfirmed_artist(monkeypatch):
     candidate = track("wrong-artist", "Tokai", ["Other Artist"], "SUNSHOWER")
-    candidate.update({"external_ids": {"isrc": "JPCR07700360"}, "duration_ms": 310173})
-    monkeypatch.setattr(spotify, "_musicbrainz_artist_identity_supported", lambda *_args: False)
-    assert run_search(monkeypatch, "都会", ["大貫妙子"], "Sunshower", [candidate]) is None
+    candidate.update({
+        "external_ids": {"isrc": "JPCR07700360"},
+        "duration_ms": 310173,
+    })
+    monkeypatch.setattr(
+        spotify,
+        "_musicbrainz_artist_identity_supported",
+        lambda *_args: False,
+    )
+    assert run_search(
+        monkeypatch, "都会", ["大貫妙子"], "Sunshower", [candidate]
+    ) is None
 
 
 def test_cross_script_rescue_requires_isrc_and_valid_recording_evidence(monkeypatch):
     candidate = track("tokai", "Tokai", ["Taeko Onuki"], "SUNSHOWER")
     candidate["duration_ms"] = 310173
-    monkeypatch.setattr(spotify, "_musicbrainz_artist_identity_supported", lambda *_args: True)
-    monkeypatch.setattr(spotify, "_musicbrainz_artist_identity", lambda *_args: {"taeko-mbid"})
+    monkeypatch.setattr(
+        spotify,
+        "_musicbrainz_artist_identity_supported",
+        lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        spotify,
+        "_musicbrainz_artist_identity",
+        lambda *_args: {"taeko-mbid"},
+    )
     monkeypatch.setattr(spotify.time, "sleep", lambda *_args: None)
 
     for recording in [
-        {"id": "wrong-title", "title": "別の曲", "length": 310173,
-         "artist-credit": [{"artist": {"id": "taeko-mbid"}}], "disambiguation": ""},
-        {"id": "wrong-artist", "title": "都会", "length": 310173,
-         "artist-credit": [{"artist": {"id": "other-mbid"}}], "disambiguation": ""},
-        {"id": "wrong-duration", "title": "都会", "length": 109000,
-         "artist-credit": [{"artist": {"id": "taeko-mbid"}}], "disambiguation": ""},
+        {
+            "id": "wrong-title", "title": "別の曲", "length": 310173,
+            "artist-credit": [{"artist": {"id": "taeko-mbid"}}],
+            "disambiguation": "",
+        },
+        {
+            "id": "wrong-artist", "title": "都会", "length": 310173,
+            "artist-credit": [{"artist": {"id": "other-mbid"}}],
+            "disambiguation": "",
+        },
+        {
+            "id": "wrong-duration", "title": "都会", "length": 109000,
+            "artist-credit": [{"artist": {"id": "taeko-mbid"}}],
+            "disambiguation": "",
+        },
     ]:
-        monkeypatch.setattr(spotify, "_musicbrainz_recordings_for_isrc", lambda _isrc, item=recording: [item])
-        assert run_search(monkeypatch, "都会", ["大貫妙子"], "Sunshower", [candidate]) is None
+        monkeypatch.setattr(
+            spotify,
+            "_musicbrainz_recordings_for_isrc",
+            lambda _isrc, item=recording: [item],
+        )
+        assert run_search(
+            monkeypatch, "都会", ["大貫妙子"], "Sunshower", [candidate]
+        ) is None
 
     candidate.pop("external_ids", None)
-    assert run_search(monkeypatch, "都会", ["大貫妙子"], "Sunshower", [candidate]) is None
+    assert run_search(
+        monkeypatch, "都会", ["大貫妙子"], "Sunshower", [candidate]
+    ) is None

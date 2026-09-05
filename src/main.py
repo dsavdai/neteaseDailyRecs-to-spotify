@@ -6,6 +6,7 @@ from src.spotify import (
     add_tracks_to_playlist,
     get_access_token,
     SpotifyRateLimitError,
+    SpotifyUnauthorizedError,
     replace_playlist_tracks,
     search_track,
 )
@@ -76,13 +77,31 @@ def main() -> None:
 
     try:
         for song in songs:
-            track_id = search_track(
-                access_token,
-                song["name"],
-                song["artists"],
-                song.get("album", ""),
-                duration_ms=song.get("duration_ms"),
-            )
+            for authorization_attempt in range(2):
+                try:
+                    track_id = search_track(
+                        access_token,
+                        song["name"],
+                        song["artists"],
+                        song.get("album", ""),
+                        duration_ms=song.get("duration_ms"),
+                    )
+                    break
+                except SpotifyUnauthorizedError as error:
+                    if authorization_attempt == 1:
+                        raise RuntimeError(
+                            "Spotify rejected a freshly refreshed access token."
+                        ) from error
+
+                    print(
+                        "Spotify access token expired during matching. "
+                        "Refreshing it and retrying the current song..."
+                    )
+                    access_token = get_access_token(
+                        settings.spotify_client_id,
+                        settings.spotify_client_secret,
+                        settings.spotify_refresh_token,
+                    )
 
             if track_id and track_id not in seen_track_ids:
                 seen_track_ids.add(track_id)
@@ -107,16 +126,39 @@ def main() -> None:
             "Keeping the existing Spotify playlist."
         )
 
-    replace_playlist_tracks(
-        access_token,
-        settings.spotify_playlist_id,
-    )
+    first_batch = track_ids[:100]
+    remaining_tracks = track_ids[100:]
 
-    add_tracks_to_playlist(
-        access_token,
-        settings.spotify_playlist_id,
-        track_ids,
-    )
+    for authorization_attempt in range(2):
+        try:
+            replace_playlist_tracks(
+                access_token,
+                settings.spotify_playlist_id,
+                first_batch,
+            )
+
+            if remaining_tracks:
+                add_tracks_to_playlist(
+                    access_token,
+                    settings.spotify_playlist_id,
+                    remaining_tracks,
+                )
+            break
+        except SpotifyUnauthorizedError as error:
+            if authorization_attempt == 1:
+                raise RuntimeError(
+                    "Spotify rejected a freshly refreshed access token."
+                ) from error
+
+            print(
+                "Spotify access token expired before playlist update. "
+                "Refreshing it and retrying the update..."
+            )
+            access_token = get_access_token(
+                settings.spotify_client_id,
+                settings.spotify_client_secret,
+                settings.spotify_refresh_token,
+            )
 
     print(
         f"Added {len(track_ids)} tracks to Spotify playlist."

@@ -40,6 +40,10 @@ class SpotifyRateLimitError(RuntimeError):
     """Raised when Spotify asks the whole sync to stop waiting."""
 
 
+class SpotifyUnauthorizedError(RuntimeError):
+    """Raised when the current Spotify access token has expired."""
+
+
 def get_access_token(
     client_id: str,
     client_secret: str,
@@ -89,6 +93,11 @@ def _spotify_get(
                 params=params,
                 timeout=30,
             )
+
+            if response.status_code == 401:
+                raise SpotifyUnauthorizedError(
+                    "Spotify access token expired."
+                )
 
             if response.status_code == 429:
                 retry_after = response.headers.get("Retry-After", "5")
@@ -851,22 +860,37 @@ def search_track(
 def replace_playlist_tracks(
     access_token: str,
     playlist_id: str,
+    track_ids: list[str] | None = None,
 ) -> None:
-    """Remove all existing tracks using Spotify's playlist replace endpoint."""
+    """Replace a playlist in one request with up to 100 tracks."""
+    uris = [
+        f"spotify:track:{track_id}"
+        for track_id in (track_ids or [])
+    ]
+
+    if len(uris) > 100:
+        raise ValueError("Spotify's replace endpoint accepts at most 100 tracks.")
+
     response = requests.put(
         f"{SPOTIFY_API_URL}/playlists/{playlist_id}/items",
         headers={
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
         },
-        json={"uris": []},
+        json={"uris": uris},
         timeout=30,
     )
 
-    print("Spotify playlist clear status:", response.status_code)
+    print("Spotify playlist replace status:", response.status_code)
+
+    if response.status_code == 401:
+        raise SpotifyUnauthorizedError(
+            "Spotify access token expired before playlist replacement."
+        )
+
     response.raise_for_status()
 
-    print("Cleared existing Spotify playlist tracks.")
+    print(f"Replaced Spotify playlist with {len(uris)} tracks.")
 
 def add_tracks_to_playlist(
     access_token: str,
@@ -906,6 +930,11 @@ def add_tracks_to_playlist(
 
         print("Spotify response status:", response.status_code)
         print("Spotify response body:", response.text)
+
+        if response.status_code == 401:
+            raise SpotifyUnauthorizedError(
+                "Spotify access token expired while adding tracks."
+            )
 
         if response.status_code != 201:
             print("Spotify response headers:", dict(response.headers))

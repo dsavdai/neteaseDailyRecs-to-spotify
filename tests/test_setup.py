@@ -1,4 +1,5 @@
 import base64
+import stat
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -37,6 +38,14 @@ def test_callback_state_validation():
         setup.extract_callback_code(callback, "wrong-state")
 
 
+def test_callback_url_from_path():
+    assert setup.callback_url_from_path(
+        "/callback?code=code-value&state=state-value"
+    ) == f"{setup.REDIRECT_URI}?code=code-value&state=state-value"
+    with pytest.raises(ValueError):
+        setup.callback_url_from_path("/wrong?code=code-value")
+
+
 def test_token_exchange_does_not_expose_secret(monkeypatch):
     captured = {}
 
@@ -56,3 +65,35 @@ def test_token_exchange_does_not_expose_secret(monkeypatch):
     assert captured["data"]["grant_type"] == "authorization_code"
     assert captured["timeout"] == 30
     assert "secret" not in str(captured.get("data", {}))
+
+
+def test_save_local_env_preserves_cookie_and_restricts_permissions(
+    monkeypatch, tmp_path,
+):
+    env_path = tmp_path / ".env"
+    env_path.write_text("NETEASE_COOKIE='__csrf=existing'\n", encoding="utf-8")
+    monkeypatch.setattr(setup, "PROJECT_ROOT", tmp_path)
+
+    saved_path = setup.save_local_env(
+        "client-id", "client-secret", "refresh-token", "playlist-id"
+    )
+    contents = saved_path.read_text(encoding="utf-8")
+
+    assert "NETEASE_COOKIE='__csrf=existing'" in contents
+    assert "SPOTIFY_CLIENT_ID='client-id'" in contents
+    assert "SPOTIFY_CLIENT_SECRET='client-secret'" in contents
+    assert "SPOTIFY_REFRESH_TOKEN='refresh-token'" in contents
+    assert "SPOTIFY_PLAYLIST_ID='playlist-id'" in contents
+    assert stat.S_IMODE(saved_path.stat().st_mode) == 0o600
+
+
+def test_save_netease_cookie_validates_before_writing(monkeypatch, tmp_path):
+    monkeypatch.setattr(setup, "PROJECT_ROOT", tmp_path)
+
+    with pytest.raises(ValueError):
+        setup.save_netease_cookie("MUSIC_U=only")
+
+    saved_path = setup.save_netease_cookie("MUSIC_U=value; __csrf=token")
+    contents = saved_path.read_text(encoding="utf-8")
+    assert "NETEASE_COOKIE='MUSIC_U=value; __csrf=token'" in contents
+    assert stat.S_IMODE(saved_path.stat().st_mode) == 0o600

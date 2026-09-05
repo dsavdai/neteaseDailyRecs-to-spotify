@@ -1,5 +1,11 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
@@ -21,6 +27,10 @@ REQUIRED_ENV_VARS = (
 
 
 def load_settings() -> Settings:
+    # Local runs use the ignored .env file. Existing process variables (for
+    # example GitHub Actions secrets) keep precedence because override=False.
+    load_dotenv(PROJECT_ROOT / ".env", override=False)
+
     for name in REQUIRED_ENV_VARS:
         if not os.getenv(name):
             raise RuntimeError(f"Missing required environment variable: {name}")
