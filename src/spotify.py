@@ -66,7 +66,7 @@ def get_access_token(
         timeout=30,
     )
     if not response.ok:
-    print("Spotify token error:", response.text)
+        print("Spotify token error:", response.text)
     response.raise_for_status()
 
     data = response.json()
