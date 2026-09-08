@@ -1,61 +1,56 @@
 name: Sync NetEase Daily Recommendations
 
-# Scheduled workflow kept on the default branch for daily execution.
-
 on:
-workflow_dispatch:
-schedule:
-- cron: "0 22 * * *"
+  workflow_dispatch:
+  schedule:
+    - cron: "0 22 * * *"
 
 jobs:
-sync:
-runs-on: ubuntu-latest
+  sync:
+    runs-on: ubuntu-latest
 
-```
-steps:
-  - name: Check out repository
-    uses: actions/checkout@v5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
 
-  - name: Set up Python
-    uses: actions/setup-python@v6
-    with:
-      python-version: "3.12"
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
 
-  - name: Install dependencies
-    run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-  - name: Run matching tests
-    env:
-      PYTHONPATH: .
-    run: pytest -q tests/test_spotify_matching.py
+      - name: Run matching tests
+        env:
+          PYTHONPATH: .
+        run: pytest -q tests/test_spotify_matching.py
 
-  - name: Run sync
-    env:
-      SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
-      SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
-      SPOTIFY_REFRESH_TOKEN: ${{ secrets.SPOTIFY_REFRESH_TOKEN }}
-      SPOTIFY_PLAYLIST_ID: ${{ secrets.SPOTIFY_PLAYLIST_ID }}
-      NETEASE_COOKIE: ${{ secrets.NETEASE_COOKIE }}
-    run: python -m src.main
+      - name: Run sync
+        env:
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+          SPOTIFY_REFRESH_TOKEN: ${{ secrets.SPOTIFY_REFRESH_TOKEN }}
+          SPOTIFY_PLAYLIST_ID: ${{ secrets.SPOTIFY_PLAYLIST_ID }}
+          NETEASE_COOKIE: ${{ secrets.NETEASE_COOKIE }}
+        run: exit 1
 
-  - name: Send failure email
-    if: failure()
-    uses: dawidd6/action-send-mail@v6
-    with:
-      server_address: smtp.gmail.com
-      server_port: 465
-      secure: true
-      username: ${{ secrets.EMAIL_USERNAME }}
-      password: ${{ secrets.EMAIL_APP_PASSWORD }}
-      subject: "NetEase → Spotify 同步失败（运行 #${{ github.run_number }}）"
-      to: ${{ secrets.EMAIL_TO }}
-      from: ${{ secrets.EMAIL_USERNAME }}
-      body: |
-        本次 NetEase → Spotify 自动同步失败。
+      - name: Send failure email
+        if: failure()
+        uses: dawidd6/action-send-mail@v6
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_APP_PASSWORD }}
+          subject: "NetEase → Spotify 同步失败（运行 #${{ github.run_number }}）"
+          to: ${{ secrets.EMAIL_TO }}
+          from: ${{ secrets.EMAIL_USERNAME }}
+          body: |
+            本次 NetEase → Spotify 自动同步失败。
 
-        GitHub Actions 运行链接：
-        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            GitHub Actions 运行链接：
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-        请打开运行日志查看具体失败原因。
-```
-
+            请打开运行日志查看具体失败原因。
