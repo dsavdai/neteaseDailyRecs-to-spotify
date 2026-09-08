@@ -33,7 +33,7 @@ jobs:
           SPOTIFY_REFRESH_TOKEN: ${{ secrets.SPOTIFY_REFRESH_TOKEN }}
           SPOTIFY_PLAYLIST_ID: ${{ secrets.SPOTIFY_PLAYLIST_ID }}
           NETEASE_COOKIE: ${{ secrets.NETEASE_COOKIE }}
-        run: exit 1
+        run: python -m src.main
 
       - name: Send failure email
         if: failure()
